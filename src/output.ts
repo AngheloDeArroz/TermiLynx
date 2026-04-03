@@ -60,15 +60,40 @@ export function planStep(index: number, step: string): void {
   console.log(chalk.white(`    ${index + 1}. ${step}`));
 }
 
-export function banner(cwd: string): void {
+export function banner(cwd: string, modelInfo?: { provider: string; model: string }): void {
   console.log('');
   console.log(chalk.bold.cyan('  ╔═══════════════════════════════╗'));
   console.log(chalk.bold.cyan('  ║       termilynx CLI           ║'));
   console.log(chalk.bold.cyan('  ╚═══════════════════════════════╝'));
   console.log(chalk.dim(`  Project: ${cwd}`));
+  if (modelInfo) {
+    console.log(chalk.green(`  AI:      ${modelInfo.provider} / ${modelInfo.model}`));
+  }
   console.log('');
+}
+
+export function showActiveModel(provider: string, model: string): void {
+  console.log(chalk.green(`  🤖 Active AI: ${provider} / ${model}`));
 }
 
 export function goodbye(): void {
   console.log(chalk.dim('  Goodbye.'));
+}
+
+export function hint(msg: string): void {
+  console.log(chalk.dim(`  💡 ${msg}`));
+}
+
+export function showHelp(): void {
+  console.log('');
+  console.log(chalk.bold.cyan('  Available commands:'));
+  console.log('');
+  console.log(chalk.white('    model / switch') + chalk.dim('  — Change AI provider or model'));
+  console.log(chalk.white('    config        ') + chalk.dim('  — Open full configuration menu'));
+  console.log(chalk.white('    clear         ') + chalk.dim('  — Clear conversation history'));
+  console.log(chalk.white('    help          ') + chalk.dim('  — Show this help'));
+  console.log(chalk.white('    exit / quit   ') + chalk.dim('  — Exit TermiLynx'));
+  console.log('');
+  console.log(chalk.dim('  Or just type what you want TermiLynx to do!'));
+  console.log('');
 }

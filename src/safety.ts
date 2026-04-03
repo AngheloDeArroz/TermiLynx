@@ -20,16 +20,44 @@ const DANGEROUS_PATTERNS: RegExp[] = [
 
 export function confirmAction(description: string): Promise<boolean> {
   return new Promise((resolve) => {
-    const rl = readline.createInterface({
-      input: process.stdin,
-      output: process.stdout,
-    });
+    process.stdout.write(`  ${description} (y/n): `);
 
-    rl.question(`  ${description} (y/n): `, (answer) => {
-      rl.close();
-      const normalized = answer.trim().toLowerCase();
-      resolve(normalized === 'y' || normalized === 'yes');
-    });
+    if (process.stdin.isTTY) {
+      // Pause any existing listeners, then enter raw mode for a single keypress
+      process.stdin.pause();
+      process.stdin.setRawMode(true);
+      process.stdin.resume();
+
+      const onData = (data: Buffer): void => {
+        const char = data.toString().charAt(0).toLowerCase();
+
+        // Ignore non-printable keys (arrows, escape sequences, etc.)
+        if (char !== 'y' && char !== 'n') {
+          return;
+        }
+
+        process.stdin.removeListener('data', onData);
+        process.stdin.setRawMode(false);
+        process.stdin.pause();
+
+        process.stdout.write(char + '\n');
+        resolve(char === 'y');
+      };
+
+      process.stdin.on('data', onData);
+    } else {
+      // Non-TTY fallback (piped input)
+      const rl = readline.createInterface({
+        input: process.stdin,
+        output: process.stdout,
+        terminal: false,
+      });
+      rl.once('line', (line) => {
+        rl.close();
+        const normalized = line.trim().toLowerCase();
+        resolve(normalized === 'y' || normalized === 'yes');
+      });
+    }
   });
 }
 

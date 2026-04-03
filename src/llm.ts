@@ -70,7 +70,7 @@ export async function callLLM(
   messages: LLMMessage[],
   tools?: ToolDefinition[],
 ): Promise<LLMResponse> {
-  const url = `${config.apiUrl}/chat/completions`;
+  const url = `${config.baseURL}/chat/completions`;
 
   const body: Record<string, unknown> = {
     model: config.model,
@@ -78,6 +78,12 @@ export async function callLLM(
       const msg: Record<string, unknown> = { role: m.role, content: m.content };
       if (m.tool_call_id) {
         msg.tool_call_id = m.tool_call_id;
+      }
+      // Forward tool_calls on assistant messages so the API can match
+      // subsequent tool-role messages to their originating call IDs
+      const extended = m as unknown as Record<string, unknown>;
+      if (extended.tool_calls) {
+        msg.tool_calls = extended.tool_calls;
       }
       return msg;
     }),
@@ -104,7 +110,7 @@ export async function callLLM(
       throw new LLMError('Request to LLM API timed out after 120s');
     }
     throw new LLMError(
-      `Failed to connect to ${config.apiUrl}: ${err instanceof Error ? err.message : String(err)}`,
+      `Failed to connect to ${config.baseURL}: ${err instanceof Error ? err.message : String(err)}`,
     );
   }
 

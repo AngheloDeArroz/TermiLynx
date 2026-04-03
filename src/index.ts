@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import * as readline from 'node:readline';
-import { loadConfig, promptForApiKey } from './config.js';
+import { promptForStartupConfig, promptForConfigMenu, getProviderLabel } from './config.js';
 import type { Config } from './config.js';
 import { scanProject, formatProjectContext } from './scanner.js';
 import { runAgent } from './agent.js';
@@ -11,77 +11,95 @@ import * as output from './output.js';
 async function main(): Promise<void> {
   const cwd = process.cwd();
 
+  // Show banner first (without model, since we don't know it yet)
   output.banner(cwd);
 
-  // Load or prompt for config
-  let config: Config | null = loadConfig();
-  if (!config) {
-    config = await promptForApiKey();
-  }
+  // Load or prompt for config (multi-profile picker)
+  let config: Config = await promptForStartupConfig();
+
+  // Re-draw banner with model info
+  console.clear();
+  output.banner(cwd, {
+    provider: getProviderLabel(config.provider),
+    model: config.model,
+  });
 
   // Scan project
   output.info('Scanning project...');
   const projectSummary = scanProject(cwd);
   const projectContext = formatProjectContext(projectSummary);
-  output.info('Project scanned. Ready.\n');
+  output.info('Project scanned. Ready.');
+  output.hint('Type "help" to see available commands.\n');
 
   // Message history persists across the session
   const history: LLMMessage[] = [];
 
-  // Start readline loop
-  const rl = readline.createInterface({
-    input: process.stdin,
-    output: process.stdout,
-  });
-
-  const prompt = (): void => {
-    rl.question('> ', async (input) => {
-      const trimmed = input.trim();
-
-      if (!trimmed) {
-        prompt();
-        return;
-      }
-
-      if (trimmed.toLowerCase() === 'exit' || trimmed.toLowerCase() === 'quit') {
-        output.goodbye();
+  // Helper to create a fresh readline interface each prompt cycle.
+  // This avoids conflicts with raw-mode stdin usage in confirmAction.
+  function askQuestion(query: string): Promise<string> {
+    return new Promise((resolve) => {
+      const rl = readline.createInterface({
+        input: process.stdin,
+        output: process.stdout,
+      });
+      rl.question(query, (answer) => {
         rl.close();
-        process.exit(0);
-      }
-
-      if (trimmed.toLowerCase() === 'clear') {
-        history.length = 0;
-        output.info('Conversation history cleared.');
-        prompt();
-        return;
-      }
-
-      if (trimmed.toLowerCase() === 'config') {
-        config = await promptForApiKey();
-        output.info('Configuration updated.');
-        prompt();
-        return;
-      }
-
-      try {
-        await runAgent(trimmed, history, config as Config, projectContext, cwd);
-      } catch (err) {
-        output.error(err instanceof Error ? err.message : String(err));
-      }
-
-      prompt();
+        resolve(answer);
+      });
     });
-  };
-
-  prompt();
+  }
 
   // Handle SIGINT gracefully
   process.on('SIGINT', () => {
     console.log('');
     output.goodbye();
-    rl.close();
     process.exit(0);
   });
+
+  // Main prompt loop
+  while (true) {
+    const input = await askQuestion('> What do you want to do? ');
+    const trimmed = input.trim();
+
+    if (!trimmed) {
+      continue;
+    }
+
+    if (trimmed.toLowerCase() === 'exit' || trimmed.toLowerCase() === 'quit') {
+      output.goodbye();
+      process.exit(0);
+    }
+
+    if (trimmed.toLowerCase() === 'clear') {
+      history.length = 0;
+      output.info('Conversation history cleared.');
+      continue;
+    }
+
+    if (
+      trimmed.toLowerCase() === 'config' ||
+      trimmed.toLowerCase() === 'model' ||
+      trimmed.toLowerCase() === 'switch'
+    ) {
+      const updated = await promptForConfigMenu(config);
+      if (updated !== null) {
+        config = updated;
+        output.showActiveModel(getProviderLabel(config.provider), config.model);
+      }
+      continue;
+    }
+
+    if (trimmed.toLowerCase() === 'help') {
+      output.showHelp();
+      continue;
+    }
+
+    try {
+      await runAgent(trimmed, history, config, projectContext, cwd);
+    } catch (err) {
+      output.error(err instanceof Error ? err.message : String(err));
+    }
+  }
 }
 
 main().catch((err) => {
