@@ -1,3 +1,4 @@
+// OpenMerlin-CLI
 {
   "compilerOptions": {
     "target": "ES2022",
