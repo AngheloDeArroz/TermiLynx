@@ -1,13 +1,29 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { execSync } from 'node:child_process';
 import { isSafePath, confirmAction } from '../safety.js';
 import * as output from '../output.js';
 import type { Tool, ToolResult } from './index.js';
 
+/**
+ * Check if we're running inside VS Code's integrated terminal.
+ * Only then can `code -r` reliably reuse the existing window.
+ */
+function isInsideVSCodeTerminal(): boolean {
+  return !!process.env.VSCODE_IPC_HOOK_CLI || process.env.TERM_PROGRAM === 'vscode';
+}
+
+/**
+ * Open VS Code's built-in diff viewer in the existing window.
+ */
+function openVSCodeDiff(originalPath: string, modifiedPath: string): void {
+  execSync(`code -r --diff "${originalPath}" "${modifiedPath}"`, { stdio: 'ignore' });
+}
+
 export const writeFileTool: Tool = {
   definition: {
     name: 'write_file',
-    description: 'Write content to a file. Shows a diff of changes and asks for user confirmation before writing. Path should be relative to the project root.',
+    description: 'Write content to a file. Shows a diff and asks for user confirmation before writing. Path should be relative to the project root.',
     parameters: {
       type: 'object',
       properties: {
@@ -39,7 +55,8 @@ export const writeFileTool: Tool = {
 
     // Read existing content for diff
     let existingContent = '';
-    if (fs.existsSync(absolutePath)) {
+    const isNewFile = !fs.existsSync(absolutePath);
+    if (!isNewFile) {
       try {
         existingContent = fs.readFileSync(absolutePath, 'utf-8');
       } catch {
@@ -47,22 +64,63 @@ export const writeFileTool: Tool = {
       }
     }
 
-    output.editingFile(filePath);
-    output.showDiff(filePath, existingContent, newContent);
-
-    const confirmed = await confirmAction('Write changes?');
-    if (!confirmed) {
-      return { success: false, output: '', error: 'User cancelled the write operation' };
+    // Check if content is identical
+    if (existingContent === newContent) {
+      return { success: true, output: `File unchanged: ${filePath}` };
     }
 
+    // --- VS Code diff (only inside VS Code's integrated terminal) ---
+    if (isInsideVSCodeTerminal()) {
+      const dir = path.dirname(absolutePath);
+      const baseName = path.basename(absolutePath);
+      const proposedPath = path.join(dir, `.openmerlin-proposed-${baseName}`);
+
+      // For new files, create an empty original so diff works
+      let createdOriginal = false;
+      if (isNewFile) {
+        fs.mkdirSync(dir, { recursive: true });
+        fs.writeFileSync(absolutePath, '', 'utf-8');
+        createdOriginal = true;
+      }
+
+      fs.writeFileSync(proposedPath, newContent, 'utf-8');
+
+      try {
+        openVSCodeDiff(absolutePath, proposedPath);
+        output.vscodeDiffOpened(filePath);
+      } catch {
+        // VS Code diff failed, show terminal diff
+        output.showDiff(filePath, existingContent, newContent);
+      }
+
+      const confirmed = await confirmAction('Accept changes?');
+
+      // Cleanup
+      try { fs.unlinkSync(proposedPath); } catch { /* ignore */ }
+      if (!confirmed && createdOriginal) {
+        try { fs.unlinkSync(absolutePath); } catch { /* ignore */ }
+      }
+
+      if (!confirmed) {
+        return { success: false, output: '', error: 'User rejected the changes' };
+      }
+    } else {
+      // --- Terminal diff (external terminal) ---
+      output.showDiff(filePath, existingContent, newContent);
+
+      const confirmed = await confirmAction('Write changes?');
+      if (!confirmed) {
+        return { success: false, output: '', error: 'User cancelled the write operation' };
+      }
+    }
+
+    // Write the file
     try {
-      // Ensure parent directory exists
       const dir = path.dirname(absolutePath);
       if (!fs.existsSync(dir)) {
         fs.mkdirSync(dir, { recursive: true });
       }
 
-      // Atomic write: temp file + rename
       const tempPath = absolutePath + '.tmp';
       fs.writeFileSync(tempPath, newContent, 'utf-8');
       fs.renameSync(tempPath, absolutePath);

@@ -163,6 +163,10 @@ export async function runAgent(
 function formatToolArgs(args: Record<string, unknown>): string {
   const entries = Object.entries(args);
   if (entries.length === 0) return '';
-  if (entries.length === 1) return String(entries[0][1]);
-  return entries.map(([k, v]) => `${k}=${String(v)}`).slice(0, 3).join(', ');
+  const truncate = (v: unknown): string => {
+    const s = String(v);
+    return s.length > 40 ? s.slice(0, 40) + '…' : s;
+  };
+  if (entries.length === 1) return truncate(entries[0][1]);
+  return entries.map(([k, v]) => `${k}=${truncate(v)}`).slice(0, 3).join(', ');
 }

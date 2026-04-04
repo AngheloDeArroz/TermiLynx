@@ -29,7 +29,7 @@ async function main(): Promise<void> {
   const projectSummary = scanProject(cwd);
   const projectContext = formatProjectContext(projectSummary);
   output.info('Project scanned. Ready.');
-  output.hint('Type "help" to see available commands.\n');
+  output.hint('Type "--help" to see available commands.\n');
 
   // Message history persists across the session
   const history: LLMMessage[] = [];
@@ -65,22 +65,18 @@ async function main(): Promise<void> {
       continue;
     }
 
-    if (trimmed.toLowerCase() === 'exit' || trimmed.toLowerCase() === 'quit') {
+    if (trimmed === '--exit' || trimmed === '--quit') {
       output.goodbye();
       process.exit(0);
     }
 
-    if (trimmed.toLowerCase() === 'clear') {
+    if (trimmed === '--clear') {
       history.length = 0;
       output.info('Conversation history cleared.');
       continue;
     }
 
-    if (
-      trimmed.toLowerCase() === 'config' ||
-      trimmed.toLowerCase() === 'model' ||
-      trimmed.toLowerCase() === 'switch'
-    ) {
+    if (trimmed === '--config' || trimmed === '--model' || trimmed === '--switch') {
       const updated = await promptForConfigMenu(config);
       if (updated !== null) {
         config = updated;
@@ -89,7 +85,7 @@ async function main(): Promise<void> {
       continue;
     }
 
-    if (trimmed.toLowerCase() === 'help') {
+    if (trimmed === '--help') {
       output.showHelp();
       continue;
     }

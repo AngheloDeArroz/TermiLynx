@@ -34,6 +34,11 @@ export function showDiff(filePath: string, before: string, after: string): void 
   }
 }
 
+export function vscodeDiffOpened(filePath: string): void {
+  console.log(chalk.cyan(`  📂 Diff opened in VS Code → ${filePath}`));
+}
+
+
 export function agentReply(text: string): void {
   console.log('');
   console.log(chalk.white(text));
@@ -90,14 +95,14 @@ export function hint(msg: string): void {
 
 export function showHelp(): void {
   console.log('');
-  console.log(chalk.bold.cyan('  Available commands:'));
+  console.log(chalk.bold.cyan('  Commands:'));
   console.log('');
-  console.log(chalk.white('    model / switch') + chalk.dim('  — Change AI provider or model'));
-  console.log(chalk.white('    config        ') + chalk.dim('  — Open full configuration menu'));
-  console.log(chalk.white('    clear         ') + chalk.dim('  — Clear conversation history'));
-  console.log(chalk.white('    help          ') + chalk.dim('  — Show this help'));
-  console.log(chalk.white('    exit / quit   ') + chalk.dim('  — Exit OpenMerlin-CLI'));
+  console.log(chalk.white('    --model   ') + chalk.dim(' Change AI provider or model'));
+  console.log(chalk.white('    --config  ') + chalk.dim(' Open full configuration menu'));
+  console.log(chalk.white('    --clear   ') + chalk.dim(' Clear conversation history'));
+  console.log(chalk.white('    --help    ') + chalk.dim(' Show this help'));
+  console.log(chalk.white('    --exit    ') + chalk.dim(' Exit OpenMerlin-CLI'));
   console.log('');
-  console.log(chalk.dim('  Or just type what you want OpenMerlin-CLI to do!'));
+  console.log(chalk.dim('  Anything else is sent as a prompt to the AI.'));
   console.log('');
 }
