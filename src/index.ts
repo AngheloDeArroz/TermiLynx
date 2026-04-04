@@ -90,6 +90,12 @@ async function main(): Promise<void> {
       continue;
     }
 
+    // Catch-all: any --command that wasn't matched above is invalid
+    if (trimmed.startsWith('--')) {
+      output.error(`Unknown command: ${trimmed}. Type --help for available commands.`);
+      continue;
+    }
+
     try {
       await runAgent(trimmed, history, config, projectContext, cwd);
     } catch (err) {
