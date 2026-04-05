@@ -1,26 +1,56 @@
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+import { execSync } from 'node:child_process';
 import type { Config } from './config.js';
 import { callLLM, LLMError } from './llm.js';
 import type { LLMMessage, ToolCall } from './llm.js';
-import { getToolDefinitions, executeTool } from './tools/index.js';
-import { generatePlan, presentPlan } from './planner.js';
+import { getReadOnlyToolDefinitions, executeTool } from './tools/index.js';
 import { compactToolResults, pruneHistory, estimateHistoryTokens } from './historyManager.js';
+import { parseDiff, applyParsedDiffs, reconstructFile } from './diffParser.js';
+import type { ParsedFileDiff } from './diffParser.js';
+import { confirmAction } from './safety.js';
 import * as output from './output.js';
 
 const MAX_TOOL_ITERATIONS = 20;
+const DIFF_COMPLETE_MARKER = 'DIFF_COMPLETE';
 
-function buildSystemPrompt(projectContext: string): string {
+// ─── System Prompt ──────────────────────────────────────────────────────────
+
+function buildPlanAgentPrompt(projectContext: string): string {
   return `You are OpenMerlin-CLI, an expert coding assistant running in the user's terminal.
 
 ## Project Context
 ${projectContext}
 
 ## Rules
-- Read files before editing. Provide COMPLETE file content when writing — no placeholders.
-- Think step-by-step. Be concise.
+- You can READ files using tools (read_file, list_files, search_code) to understand the codebase.
+- You must NEVER write files directly. Instead, express ALL changes as a unified diff.
+- Think step-by-step. Read the files you need first, then produce your diff.
 - Never modify files outside the project directory.
-- Confirm with the user before writing files or running commands.
-- Never expose API keys or secrets.`;
+- Never expose API keys or secrets.
+
+## Output Format
+After reading files and reasoning about the changes, output a unified diff block for EVERY file you want to change:
+
+\`\`\`diff
+--- a/path/to/file.ts
++++ b/path/to/file.ts
+@@ -startline,count +startline,count @@
+ context line
+-removed line
++added line
+ context line
+\`\`\`
+
+For NEW files use \`--- /dev/null\` as the old path.
+For DELETED files use \`+++ /dev/null\` as the new path.
+Include 3 lines of context around each change.
+
+When you are done producing all diffs, end your response with the exact marker:
+${DIFF_COMPLETE_MARKER}`;
 }
+
+// ─── Main Entry Point ───────────────────────────────────────────────────────
 
 export async function runAgent(
   userInput: string,
@@ -33,59 +63,35 @@ export async function runAgent(
   if (history.length === 0) {
     history.push({
       role: 'system',
-      content: buildSystemPrompt(projectContext),
+      content: buildPlanAgentPrompt(projectContext),
     });
   }
 
   // Append user message
   history.push({ role: 'user', content: userInput });
 
-  output.thinking();
+  // ═══════════════════════════════════════════════════════════════════════════
+  //  PHASE 1 — Plan Agent (AI reads files, reasons, outputs unified diff)
+  // ═══════════════════════════════════════════════════════════════════════════
 
-  // Detect complex tasks and generate a plan
-  const complexKeywords = [
-    'refactor', 'restructure', 'migrate', 'convert', 'implement',
-    'add feature', 'new feature', 'create', 'build', 'redesign',
-    'all files', 'all functions', 'entire', 'across',
-  ];
-  const isComplex = complexKeywords.some((kw) =>
-    userInput.toLowerCase().includes(kw),
-  );
+  output.phaseLabel('Phase 1: Planning...');
 
-  if (isComplex) {
-    const plan = await generatePlan(userInput, projectContext, config);
-    if (plan && plan.length > 0) {
-      const proceed = await presentPlan(plan);
-      if (!proceed) {
-        output.info('Plan cancelled.');
-        // Remove the user message we just added
-        history.pop();
-        return;
-      }
-      // Inject plan into the conversation
-      history.push({
-        role: 'user',
-        content: `The user approved this plan. Execute it step by step:\n${plan.map((s, i) => `${i + 1}. ${s}`).join('\n')}`,
-      });
-    }
-  }
-
-  const toolDefs = getToolDefinitions();
+  const readOnlyTools = getReadOnlyToolDefinitions();
   let iterations = 0;
+  let finalResponse = '';
 
   while (iterations < MAX_TOOL_ITERATIONS) {
     iterations++;
 
-    // Token optimization: compact old tool results, then prune if over budget
+    // Token optimization
     compactToolResults(history, 2);
     const prunedHistory = pruneHistory(history);
-
     const inputTokens = estimateHistoryTokens(prunedHistory);
     output.tokenEstimate(inputTokens);
 
     let response;
     try {
-      response = await callLLM(config, prunedHistory, toolDefs);
+      response = await callLLM(config, prunedHistory, readOnlyTools);
     } catch (err) {
       if (err instanceof LLMError) {
         output.error(`LLM API error: ${err.message}`);
@@ -95,22 +101,14 @@ export async function runAgent(
       return;
     }
 
-    // If there are tool calls, execute them
+    // If there are tool calls (read-only), execute them
     if (response.toolCalls && response.toolCalls.length > 0) {
-      // Append assistant message with tool calls to history
-      // We need to include the tool_calls in the message for the API
-      const assistantMsg: LLMMessage & { tool_calls?: ToolCall[] } = {
-        role: 'assistant',
-        content: response.content || '',
-      };
-
-      // Store tool calls info for the API
       history.push({
         role: 'assistant',
         content: response.content || '',
       });
 
-      // Patch the last message to include tool_calls for API compatibility
+      // Patch tool_calls onto the message for API compatibility
       const lastMsg = history[history.length - 1] as LLMMessage & { tool_calls?: object[] };
       lastMsg.tool_calls = response.toolCalls.map((tc) => ({
         id: tc.id,
@@ -121,7 +119,7 @@ export async function runAgent(
         },
       }));
 
-      // Execute each tool call
+      // Execute each read-only tool call
       for (const toolCall of response.toolCalls) {
         output.toolStart(`${toolCall.name} → ${formatToolArgs(toolCall.arguments)}`);
 
@@ -133,7 +131,6 @@ export async function runAgent(
           output.error(result.error || 'Tool execution failed');
         }
 
-        // Append tool result to history
         history.push({
           role: 'tool',
           content: result.success
@@ -143,14 +140,13 @@ export async function runAgent(
         });
       }
 
-      // Continue the loop — call LLM again with tool results
-      continue;
+      continue; // Loop back to get AI's next response
     }
 
-    // No tool calls — final response
+    // No tool calls — this is the final response
     if (response.content) {
+      finalResponse = response.content;
       history.push({ role: 'assistant', content: response.content });
-      output.agentReply(response.content);
     }
     break;
   }
@@ -158,6 +154,144 @@ export async function runAgent(
   if (iterations >= MAX_TOOL_ITERATIONS) {
     output.warn(`Reached maximum tool iterations (${MAX_TOOL_ITERATIONS}). Stopping.`);
   }
+
+  if (!finalResponse) {
+    output.error('No response from AI.');
+    return;
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  //  PHASE 2 — Apply (no AI — pure TypeScript parse + write)
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  // Check if response contains diffs
+  const parsedDiffs = parseDiff(finalResponse);
+
+  if (parsedDiffs.length === 0) {
+    // No diffs — just a conversational reply (questions, explanations, etc.)
+    output.agentReply(finalResponse);
+    return;
+  }
+
+  output.phaseLabel('Phase 2: Applying changes...');
+  output.diffSummary(parsedDiffs.map((d) => d.filePath));
+
+  // Open diffs in VS Code if available
+  const useVSCode = isInsideVSCodeTerminal();
+
+  if (useVSCode) {
+    const cleanups = openAllDiffsInVSCode(parsedDiffs, projectRoot);
+
+    const confirmed = await confirmAction('Accept all changes?');
+
+    // Cleanup temp files
+    for (const cleanup of cleanups) cleanup();
+
+    if (!confirmed) {
+      output.info('Changes discarded.');
+      return;
+    }
+  } else {
+    // Terminal fallback: show compact summary (diffs are already summarized above)
+    // Show the raw diff portion for terminal users
+    const diffSection = extractDiffSection(finalResponse);
+    if (diffSection) {
+      output.showDiff('changes', '', diffSection);
+    }
+
+    const confirmed = await confirmAction('Apply all changes?');
+    if (!confirmed) {
+      output.info('Changes discarded.');
+      return;
+    }
+  }
+
+  // Apply changes — pure file I/O, no AI
+  const written = applyParsedDiffs(parsedDiffs, projectRoot);
+
+  output.phaseLabel('Done');
+  output.info(`Applied changes to ${written.length} file(s):`);
+  for (const f of written) {
+    console.log(output.formatWrittenFile(f));
+  }
+}
+
+// ─── VS Code Integration ───────────────────────────────────────────────────
+
+function isInsideVSCodeTerminal(): boolean {
+  return !!process.env.VSCODE_IPC_HOOK_CLI || process.env.TERM_PROGRAM === 'vscode';
+}
+
+/**
+ * Open VS Code diff for each changed file.
+ * Returns an array of cleanup functions to remove temp files.
+ */
+function openAllDiffsInVSCode(
+  diffs: ParsedFileDiff[],
+  projectRoot: string,
+): (() => void)[] {
+  const cleanups: (() => void)[] = [];
+
+  for (const diff of diffs) {
+    const absolutePath = path.resolve(projectRoot, diff.filePath);
+    const dir = path.dirname(absolutePath);
+    const baseName = path.basename(absolutePath);
+    const proposedPath = path.join(dir, `.openmerlin-proposed-${baseName}`);
+
+    // Ensure directory exists
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+
+    // For new files, create empty original so diff works
+    let createdOriginal = false;
+    if (!fs.existsSync(absolutePath)) {
+      fs.writeFileSync(absolutePath, '', 'utf-8');
+      createdOriginal = true;
+    }
+
+    // Reconstruct the proposed file content
+    const proposed = reconstructFile(diff, projectRoot);
+    fs.writeFileSync(proposedPath, proposed, 'utf-8');
+
+    try {
+      execSync(`code -r --diff "${absolutePath}" "${proposedPath}"`, { stdio: 'ignore' });
+      output.vscodeDiffOpened(diff.filePath);
+    } catch {
+      // VS Code command failed — fall through
+    }
+
+    cleanups.push(() => {
+      try { fs.unlinkSync(proposedPath); } catch { /* ignore */ }
+      if (createdOriginal) {
+        try { fs.unlinkSync(absolutePath); } catch { /* ignore */ }
+      }
+    });
+  }
+
+  return cleanups;
+}
+
+// ─── Helpers ────────────────────────────────────────────────────────────────
+
+/**
+ * Extract just the diff section from the LLM response for terminal display.
+ */
+function extractDiffSection(response: string): string | null {
+  const match = response.match(/```diff\s*\n([\s\S]*?)```/);
+  if (match) return match[1].trim();
+
+  // Try to find raw diff blocks
+  const diffStart = response.indexOf('--- ');
+  if (diffStart !== -1) {
+    const markerIdx = response.indexOf(DIFF_COMPLETE_MARKER, diffStart);
+    if (markerIdx !== -1) {
+      return response.slice(diffStart, markerIdx).trim();
+    }
+    return response.slice(diffStart).trim();
+  }
+
+  return null;
 }
 
 function formatToolArgs(args: Record<string, unknown>): string {

@@ -5,6 +5,17 @@ export function thinking(): void {
   console.log(chalk.dim('  Thinking...'));
 }
 
+export function phaseLabel(phase: string): void {
+  console.log(chalk.bold.magenta(`  ⚡ ${phase}`));
+}
+
+export function diffSummary(files: string[]): void {
+  console.log(chalk.cyan(`  📋 ${files.length} file(s) to change:`));
+  for (const f of files) {
+    console.log(chalk.white(`      ${f}`));
+  }
+}
+
 export function toolStart(name: string): void {
   console.log(chalk.cyan(`  Running tool: ${name}`));
 }
@@ -105,4 +116,8 @@ export function showHelp(): void {
   console.log('');
   console.log(chalk.dim('  Anything else is sent as a prompt to the AI.'));
   console.log('');
+}
+
+export function formatWrittenFile(filePath: string): string {
+  return chalk.green(`    ✔ ${filePath}`);
 }

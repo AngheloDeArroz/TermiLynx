@@ -48,6 +48,14 @@ export function getToolDefinitions(): ToolDefinition[] {
   return Array.from(toolRegistry.values()).map((t) => t.definition);
 }
 
+const READ_ONLY_TOOLS = new Set(['read_file', 'list_files', 'search_code']);
+
+export function getReadOnlyToolDefinitions(): ToolDefinition[] {
+  return Array.from(toolRegistry.values())
+    .filter((t) => READ_ONLY_TOOLS.has(t.definition.name))
+    .map((t) => t.definition);
+}
+
 export async function executeTool(
   name: string,
   params: Record<string, unknown>,
