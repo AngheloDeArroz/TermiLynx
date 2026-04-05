@@ -28,6 +28,14 @@
   "engines": {
     "node": ">=18.0.0"
   },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/AngheloDeArroz/OpenMerlin-CLI.git"
+  },
+  "homepage": "https://github.com/AngheloDeArroz/OpenMerlin-CLI#readme",
+  "bugs": {
+    "url": "https://github.com/AngheloDeArroz/OpenMerlin-CLI/issues"
+  },
   "author": "AngheloDeArroz",
   "license": "MIT"
 }
