@@ -55,7 +55,7 @@ export async function runAgent(
   if (isComplex) {
     const plan = await generatePlan(userInput, projectContext, config);
     if (plan && plan.length > 0) {
-      const proceed = await presentPlan(plan);
+      const proceed = await presentPlan(plan, projectRoot);
       if (!proceed) {
         output.info('Plan cancelled.');
         // Remove the user message we just added

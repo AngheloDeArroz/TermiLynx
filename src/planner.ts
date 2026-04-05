@@ -1,8 +1,14 @@
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+import { execSync } from 'node:child_process';
 import type { Config } from './config.js';
 import { callLLM } from './llm.js';
 import type { LLMMessage } from './llm.js';
+import { isInsideVSCodeTerminal } from './diffEngine.js';
 import * as output from './output.js';
 import { confirmAction } from './safety.js';
+
+const PLAN_FILENAME = '.openmerlin-plan.md';
 
 export async function generatePlan(
   task: string,
@@ -46,13 +52,33 @@ Do not include any other text, just the JSON array.`,
   }
 }
 
-export async function presentPlan(steps: string[]): Promise<boolean> {
-  console.log('');
-  output.info('Plan:');
-  for (let i = 0; i < steps.length; i++) {
-    output.planStep(i, steps[i]);
-  }
-  console.log('');
+export async function presentPlan(steps: string[], projectRoot: string): Promise<boolean> {
+  const planPath = path.join(projectRoot, PLAN_FILENAME);
 
-  return confirmAction('Proceed with plan?');
+  // Build markdown plan
+  const lines = [
+    '# OpenMerlin — Proposed Plan',
+    '',
+    '> Review this plan, then return to the terminal to approve or reject.',
+    '',
+    ...steps.map((s, i) => `${i + 1}. ${s}`),
+    '',
+  ];
+  fs.writeFileSync(planPath, lines.join('\n'), 'utf-8');
+
+  // Open in editor
+  if (isInsideVSCodeTerminal()) {
+    try {
+      execSync(`code -r "${planPath}"`, { stdio: 'ignore' });
+    } catch { /* ignore */ }
+  }
+
+  output.info(`Plan written to ${PLAN_FILENAME} — review it, then confirm below.`);
+  const result = await confirmAction('Proceed with plan?');
+
+  // Cleanup
+  try { fs.unlinkSync(planPath); } catch { /* ignore */ }
+
+  return result;
 }
+

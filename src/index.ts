@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import * as readline from 'node:readline';
-import { promptForStartupConfig, promptForConfigMenu, getProviderLabel } from './config.js';
+import { loadConfig, promptForConfig, promptForConfigMenu, getProviderLabel } from './config.js';
 import type { Config } from './config.js';
 import { scanProject, formatProjectContext } from './scanner.js';
 import { runAgent } from './agent.js';
@@ -11,11 +11,13 @@ import * as output from './output.js';
 async function main(): Promise<void> {
   const cwd = process.cwd();
 
-  // Show banner first (without model, since we don't know it yet)
-  output.banner(cwd);
-
-  // Load or prompt for config (multi-profile picker)
-  let config: Config = await promptForStartupConfig();
+  // Auto-load last-used profile — only prompt if no config exists
+  let config: Config | null = loadConfig();
+  if (!config) {
+    output.banner(cwd);
+    console.log('\n  Welcome to OpenMerlin-CLI!\n');
+    config = await promptForConfig();
+  }
 
   // Re-draw banner with model info
   console.clear();
@@ -42,6 +44,7 @@ async function main(): Promise<void> {
         input: process.stdin,
         output: process.stdout,
       });
+
       rl.question(query, (answer) => {
         rl.close();
         resolve(answer);
@@ -81,6 +84,21 @@ async function main(): Promise<void> {
       if (updated !== null) {
         config = updated;
         output.showActiveModel(getProviderLabel(config.provider), config.model);
+      }
+      continue;
+    }
+
+    if (trimmed.startsWith('--multi ')) {
+      const task = trimmed.slice('--multi '.length).trim();
+      if (task) {
+        try {
+          const { runTask } = await import('./orchestrator.js');
+          await runTask(task, config, projectContext, cwd);
+        } catch (err) {
+          output.error(err instanceof Error ? err.message : String(err));
+        }
+      } else {
+        output.error('Usage: --multi <task description>');
       }
       continue;
     }
