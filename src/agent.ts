@@ -70,13 +70,37 @@ export async function runAgent(
   // Append user message
   history.push({ role: 'user', content: userInput });
 
-  // ═══════════════════════════════════════════════════════════════════════════
-  //  PHASE 1 — Plan Agent (AI reads files, reasons, outputs unified diff)
-  // ═══════════════════════════════════════════════════════════════════════════
+  output.thinking();
 
-  output.phaseLabel('Phase 1: Planning...');
+  // Detect complex tasks and generate a plan
+  const complexKeywords = [
+    'refactor', 'restructure', 'migrate', 'convert', 'implement',
+    'add feature', 'new feature', 'create', 'build', 'redesign',
+    'all files', 'all functions', 'entire', 'across',
+  ];
+  const isComplex = complexKeywords.some((kw) =>
+    userInput.toLowerCase().includes(kw),
+  );
 
-  const readOnlyTools = getReadOnlyToolDefinitions();
+  if (isComplex) {
+    const plan = await generatePlan(userInput, projectContext, config);
+    if (plan && plan.length > 0) {
+      const proceed = await presentPlan(plan);
+      if (!proceed) {
+        output.info('Plan cancelled.');
+        // Remove the user message we just added
+        history.pop();
+        return;
+      }
+      // Inject plan into the conversation
+      history.push({
+        role: 'user',
+        content: `The user approved this plan. Execute it step by step:\n${plan.map((s, i) => `${i + 1}. ${s}`).join('\n')}`,
+      });
+    }
+  }
+
+  const toolDefs = getToolDefinitions();
   let iterations = 0;
   let finalResponse = '';
 

@@ -13,9 +13,15 @@ export interface ToolCall {
   arguments: Record<string, unknown>;
 }
 
+export interface TokenUsage {
+  promptTokens: number;
+  completionTokens: number;
+}
+
 export interface LLMResponse {
   content: string;
   toolCalls?: ToolCall[];
+  usage?: TokenUsage;
 }
 
 export class LLMError extends Error {
@@ -48,6 +54,11 @@ interface OpenAIChatChoice {
 
 interface OpenAIChatResponse {
   choices: OpenAIChatChoice[];
+  usage?: {
+    prompt_tokens: number;
+    completion_tokens: number;
+    total_tokens: number;
+  };
   error?: {
     message: string;
     type: string;
@@ -153,6 +164,14 @@ export async function callLLM(
   const result: LLMResponse = {
     content: choice.message.content || '',
   };
+
+  // Attach token usage if the API returned it
+  if (data.usage) {
+    result.usage = {
+      promptTokens: data.usage.prompt_tokens,
+      completionTokens: data.usage.completion_tokens,
+    };
+  }
 
   if (choice.message.tool_calls && choice.message.tool_calls.length > 0) {
     result.toolCalls = choice.message.tool_calls.map((tc) => {

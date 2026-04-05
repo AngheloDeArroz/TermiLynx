@@ -2,16 +2,9 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { execSync } from 'node:child_process';
 import { isSafePath, confirmAction } from '../safety.js';
+import { isInsideVSCodeTerminal } from '../diffEngine.js';
 import * as output from '../output.js';
 import type { Tool, ToolResult } from './index.js';
-
-/**
- * Check if we're running inside VS Code's integrated terminal.
- * Only then can `code -r` reliably reuse the existing window.
- */
-function isInsideVSCodeTerminal(): boolean {
-  return !!process.env.VSCODE_IPC_HOOK_CLI || process.env.TERM_PROGRAM === 'vscode';
-}
 
 /**
  * Open VS Code's built-in diff viewer in the existing window.
