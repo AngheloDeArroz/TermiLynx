@@ -5,6 +5,7 @@ import type { Config } from './config.js';
 import { callLLM, LLMError } from './llm.js';
 import type { LLMMessage, ToolCall } from './llm.js';
 import { getReadOnlyToolDefinitions, executeTool } from './tools/index.js';
+import { generatePlan, presentPlan } from './planner.js';
 import { compactToolResults, pruneHistory, estimateHistoryTokens } from './historyManager.js';
 import { parseDiff, applyParsedDiffs, reconstructFile } from './diffParser.js';
 import type { ParsedFileDiff } from './diffParser.js';
@@ -85,7 +86,7 @@ export async function runAgent(
   if (isComplex) {
     const plan = await generatePlan(userInput, projectContext, config);
     if (plan && plan.length > 0) {
-      const proceed = await presentPlan(plan);
+      const proceed = await presentPlan(plan, projectRoot);
       if (!proceed) {
         output.info('Plan cancelled.');
         // Remove the user message we just added
@@ -100,7 +101,7 @@ export async function runAgent(
     }
   }
 
-  const toolDefs = getToolDefinitions();
+  const readOnlyTools = getReadOnlyToolDefinitions();
   let iterations = 0;
   let finalResponse = '';
 
