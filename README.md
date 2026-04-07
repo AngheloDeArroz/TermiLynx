@@ -1,4 +1,4 @@
-# ![OpenMerlin Banner](docs/assets/banner.png)
+# ![OpenMerlin](docs/assets/banner.png)
 
 <div align="center">
 
